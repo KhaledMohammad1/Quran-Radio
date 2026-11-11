@@ -1,0 +1,17 @@
+{
+  "name": "quran-radio-app",
+  "version": "1.1.0",
+  "scripts": {
+    "sync": "cap sync android",
+    "assets": "capacitor-assets generate --android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/assets": "^4.0.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capawesome-team/capacitor-android-foreground-service": "^8.1.0"
+  },
+  "private": true
+}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <title>وَرَتِّلِ الْقُرْآنَ تَرْتِيلًا</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+
+    <header class="header">
+      <button id="themeToggle" class="theme-btn" title="تغيير المظهر">🌙</button>
+
+      <div class="lang-switcher">
+        <button id="langBtn" class="lang-btn" title="تغيير اللغة / Change Language">
+          <span class="lang-globe">🌐</span>
+          <span id="langCode">AR</span>
+          <span class="lang-caret">▾</span>
+        </button>
+        <div id="langMenu" class="lang-menu" hidden></div>
+      </div>
+      
+      <div class="header-ornament">﷽</div>
+      <h1 id="headerTitle" class="header-title">وَرَتِّلِ الْقُرْآنَ تَرْتِيلًا</h1>
+      <p id="headerSubtitle" class="header-subtitle">LIVE QURAN RADIO • بث مباشر</p>
+    </header>
+
+    <div class="now-playing-card">
+      <div class="now-playing-label">
+        <div class="status-indicator">
+          <div id="statusDot"></div>
+          <div id="loadingRing"></div>
+          <span id="statusText">متوقف</span>
+        </div>
+      </div>
+
+      <div class="now-playing-info">
+        <span id="nowPlayingName">محمود خليل الحصري</span>
+        <span id="nowPlayingSubtitle">رواية حفص</span>
+      </div>
+
+      <div class="controls">
+        <button id="playBtn" title="تشغيل / إيقاف">
+          <span id="playIcon">▶</span>
+        </button>
+
+        <div class="volume-control">
+          <span id="volumeIcon" title="كتم الصوت">🔊</span>
+          <input
+            type="range"
+            id="volumeSlider"
+            min="0"
+            max="100"
+            step="1"
+            value="100"
+            title="مستوى الصوت"
+          >
+        </div>
+      </div>
+    </div>
+
+    <div class="search-container">
+      <input type="text" id="searchInput" placeholder="ابحث عن قارئ أو إذاعة..." autocomplete="off">
+    </div>
+
+    <div class="station-list-wrapper">
+      <div id="stationList"></div>
+    </div>
+
+    <footer class="footer">
+      <span>❝</span> <span id="footerQuote">وَرَتِّلِ الْقُرْآنَ تَرْتِيلًا</span> <span>❞</span>
+    </footer>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
