@@ -19,7 +19,6 @@ const store = {
 const Cap = window.Capacitor;
 const isNative = !!(Cap && Cap.isNativePlatform && Cap.isNativePlatform());
 const NativePlugins = (Cap && Cap.Plugins) || {};
-const FG = NativePlugins.ForegroundService;
 const SystemBars = NativePlugins.SystemBars;
 const AppPlugin = NativePlugins.App;
 
@@ -31,53 +30,47 @@ function applySystemBars(theme) {
   } catch (_) {}
 }
 
-// ── Foreground service (keeps audio alive with screen off / app in background) ──
-const FG_CHANNEL = 'quran_radio_playback';
-let fgReady = false;
-let fgRunning = false;
+// ── Media notification (MediaStyle + MediaSession: shows on lock screen with controls) ──
+const Media = NativePlugins.MediaControl;
+let mediaPermAsked = false;
 
-async function fgSetup() {
-  if (!FG || fgReady) return;
-  try { await FG.requestPermissions(); } catch (_) {}
-  try {
-    await FG.createNotificationChannel({
-      id: FG_CHANNEL,
-      name: 'Quran Radio',
-      description: 'Quran Radio playback',
-      importance: 2
-    });
-  } catch (_) {}
-  fgReady = true;
+function mediaLabels() {
+  const ar = currentLang === 'ar' || currentLang === 'ur';
+  return ar
+    ? { lblPlay: 'تشغيل', lblPause: 'إيقاف مؤقت', lblNext: 'التالي', lblPrev: 'السابق', lblStop: 'إغلاق' }
+    : { lblPlay: 'Play', lblPause: 'Pause', lblNext: 'Next', lblPrev: 'Previous', lblStop: 'Close' };
 }
 
-async function fgStart(title, body) {
-  if (!FG) return;
+async function mediaShow(playing) {
+  if (!Media) return;
   try {
-    await fgSetup();
-    const opts = {
-      id: 1001,
-      title,
-      body,
-      smallIcon: 'ic_stat_radio',
-      serviceType: 2, // FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-      silent: true,
-      notificationChannelId: FG_CHANNEL,
-      buttons: [{ title: getUI('stopped') === 'متوقف' ? 'إيقاف' : 'Stop', id: 1 }]
-    };
-    if (fgRunning) await FG.updateForegroundService(opts);
-    else await FG.startForegroundService(opts);
-    fgRunning = true;
+    if (!mediaPermAsked) { mediaPermAsked = true; await Media.requestPermission(); }
+    const n = stationNotifText();
+    await Media.show({ title: n.title, subtitle: n.body, playing, ...mediaLabels() });
   } catch (_) {}
 }
 
-async function fgStop() {
-  if (!FG || !fgRunning) return;
-  fgRunning = false;
-  try { await FG.stopForegroundService(); } catch (_) {}
+async function mediaHide() {
+  if (!Media) return;
+  try { await Media.hide(); } catch (_) {}
 }
 
-if (FG && FG.addListener) {
-  FG.addListener('buttonClicked', () => { stopFromNotification(); });
+if (Media && Media.addListener) {
+  Media.addListener('action', (ev) => {
+    const a = ev && ev.action;
+    if (a === 'play') {
+      if (!isPlaying) startPlaybackForCurrentStation();
+    } else if (a === 'pause') {
+      pauseFromExternal(false);
+    } else if (a === 'next') {
+      stepStation(1);
+    } else if (a === 'prev') {
+      stepStation(-1);
+    } else if (a === 'stop') {
+      pauseFromExternal(true);
+      try { if (AppPlugin && AppPlugin.exitApp) AppPlugin.exitApp(); } catch (_) {}
+    }
+  });
 }
 
 // Back button: send app to background instead of killing it (so audio keeps playing)
@@ -248,44 +241,51 @@ async function enginePlay(message) {
   store.set({ currentStation: message.stationIndex, volume: message.volume });
 
   // start the foreground service first so Android keeps us alive while the stream connects
-  const n = stationNotifText();
-  fgStart(n.title, n.body);
+  mediaShow(true);
 
   const res = await playStation(message.url, message.volume, message.fallbackUrls || []);
   if (res && res.aborted) return { success: false, aborted: true };
   if (!res || !res.success) {
     wantPlaying = false;
-    fgStop();
+    mediaHide();
     return { success: false, error: (res && res.error) || 'Stream error' };
   }
   return { success: true };
 }
 
-function enginePause() {
+function enginePause(hideNotification) {
   wantPlaying = false;
   currentPlayId++;
   clearStallTimer();
   clearReconnectTimer();
   activePlaylist = null;
   audio.pause();
-  fgStop();
+  if (hideNotification) mediaHide(); else mediaShow(false);
   return { success: true };
 }
 
-// Called when the user taps "Stop" on the notification
-function stopFromNotification() {
+// Called from the notification / lock screen / headset buttons
+function pauseFromExternal(hideNotification) {
   activePlayRequestId++;
-  enginePause();
+  enginePause(!!hideNotification);
   hasConnectionError = false;
   isPlaying = false;
   setLoadingState(false);
   updatePlayState();
 }
 
+function stepStation(dir) {
+  const n = stations.length;
+  const next = (currentStationIndex + dir + n) % n;
+  selectStation(next);
+  const el = stationList.querySelector('.station-item.active');
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
 async function engineHandle(message) {
   switch (message.action) {
     case 'play': return enginePlay(message);
-    case 'pause': return enginePause();
+    case 'pause': return enginePause(false);
     case 'setVolume': {
       const v = Math.max(0, Math.min(1, Number(message.volume ?? 1)));
       applyVolume(v);
@@ -344,7 +344,7 @@ function scheduleReconnect(delay) {
   if (!wantPlaying || !lastPlayArgs || reconnectTimer) return;
   if (reconnectAttempts >= 6) {
     wantPlaying = false;
-    fgStop();
+    mediaShow(false);
     activePlayRequestId++;
     isPlaying = false;
     hasConnectionError = true;
