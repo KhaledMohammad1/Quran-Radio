@@ -16,6 +16,7 @@ import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.net.wifi.WifiManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.PowerManager;
 
@@ -211,6 +212,11 @@ public class MediaPlaybackService extends Service {
 
             @Override
             public void onStop() { forward("stop"); }
+
+            @Override
+            public void onCustomAction(String action, Bundle extras) {
+                if ("close".equals(action)) forward("stop");
+            }
         });
         session.setSessionActivity(openAppIntent());
         session.setActive(true);
@@ -244,6 +250,7 @@ public class MediaPlaybackService extends Service {
                 | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS;
         PlaybackState state = new PlaybackState.Builder()
                 .setActions(actions)
+                .addCustomAction("close", lblStop, R.drawable.ic_stop_square)
                 .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED,
                         PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
                 .build();
@@ -298,7 +305,7 @@ public class MediaPlaybackService extends Service {
             b.addAction(action(android.R.drawable.ic_media_play, lblPlay, ACTION_PLAY, 3));
         }
         b.addAction(action(android.R.drawable.ic_media_next, lblNext, ACTION_NEXT, 4));
-        b.addAction(action(android.R.drawable.ic_menu_close_clear_cancel, lblStop, ACTION_STOP, 5));
+        b.addAction(action(R.drawable.ic_stop_square, lblStop, ACTION_STOP, 5));
 
         Notification.MediaStyle style = new Notification.MediaStyle()
                 .setShowActionsInCompactView(0, 1, 2);
