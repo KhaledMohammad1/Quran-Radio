@@ -617,3 +617,18 @@ html, body { user-select: none; -webkit-user-select: none; overscroll-behavior: 
 .header { padding-top: calc(12px + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px))); }
 .theme-btn { top: calc(14px + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px))); }
 .lang-switcher { top: calc(13px + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px))); }
+
+/* ─── Collapsible sections ─── */
+.section-tab-header { cursor: pointer; padding-top: 11px; padding-bottom: 11px; user-select: none; }
+.section-tab-header:active { background: var(--bg-hover); }
+.section-tab-end { display: flex; align-items: center; gap: 8px; }
+.section-chevron {
+  font-size: 13px; color: var(--gold-primary); line-height: 1;
+  transition: transform 0.2s ease;
+}
+.section-tab-header.collapsed .section-chevron { transform: rotate(90deg); }
+html[dir="ltr"] .section-tab-header.collapsed .section-chevron { transform: rotate(-90deg); }
+.section-tab-header.has-active .section-tab-title::after {
+  content: ' ●'; color: var(--gold-primary); font-size: 8px; vertical-align: middle;
+}
+.section-tab-title { font-size: 13px; }

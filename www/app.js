@@ -232,14 +232,16 @@ function pauseFromExternal(hideNotification) {
 
 function stepStation(dir) {
   let list = Array.from(stationList.querySelectorAll('.station-item'))
-    .filter((el) => el.style.display !== 'none')
+    .filter((el) => el.dataset.match !== '0')
     .map((el) => parseInt(el.dataset.index, 10));
   if (!list.length) list = stations.map((_, i) => i);
   const pos = list.indexOf(currentStationIndex);
   const next = pos === -1
     ? list[dir > 0 ? 0 : list.length - 1]
     : list[(pos + dir + list.length) % list.length];
+  expandedSections.add(stations[next].section);
   selectStation(next);
+  filterStations(searchInput.value);
   const el = stationList.querySelector('.station-item.active');
   if (el) el.scrollIntoView({ block: 'nearest' });
 }
@@ -2218,6 +2220,7 @@ const SUBTITLE_TRANSLATIONS = {
   }
 };
 
+const expandedSections = new Set(); // all sections start collapsed
 let currentLang = 'ar';
 let currentCategory = 'all';
 let isPlaying = false;
@@ -2365,6 +2368,7 @@ function buildCategoryTabs() {
     btn.textContent = translateSectionTitle(sec.id);
     btn.addEventListener('click', () => {
       currentCategory = sec.id;
+      if (currentCategory !== 'all') expandedSections.add(currentCategory);
       document.querySelectorAll('.category-chip').forEach((chip) => {
         chip.classList.toggle('active', chip.dataset.section === currentCategory);
       });
@@ -2403,8 +2407,12 @@ function buildStationList() {
           ${badgeText ? `<span class="section-tab-pill">${badgeText}</span>` : ''}
           <span class="section-tab-title">${sectionTitle}</span>
         </div>
-        <span class="section-tab-count">${count}</span>
+        <div class="section-tab-end">
+          <span class="section-tab-count">${count}</span>
+          <span class="section-chevron">▾</span>
+        </div>
       `;
+      header.addEventListener('click', () => toggleSection(station.section));
       stationList.appendChild(header);
     }
 
@@ -2477,6 +2485,7 @@ function updateStationUI() {
   const current = stations[currentStationIndex];
   nowPlayingName.textContent = translateStationName(current.name);
   nowPlayingSubtitle.textContent = translateStationSubtitle(current.subtitle);
+  markActiveSection();
 }
 
 function refreshStatusLabel() {
@@ -2546,10 +2555,16 @@ volumeIcon.addEventListener('click', () => {
   sendMessage({ target: 'background', action: 'setVolume', volume: currentVolume });
 });
 
+function toggleSection(sectionId) {
+  if (expandedSections.has(sectionId)) expandedSections.delete(sectionId);
+  else expandedSections.add(sectionId);
+  filterStations(searchInput.value);
+}
+
 function filterStations(rawQuery) {
   const searchTerm = (rawQuery || '').trim().toLowerCase();
   const items = stationList.querySelectorAll('.station-item');
-  const visibleCountBySection = {};
+  const matchCountBySection = {};
 
   items.forEach((item) => {
     const index = parseInt(item.dataset.index, 10);
@@ -2575,23 +2590,35 @@ function filterStations(rawQuery) {
       matchesSearch = searchable.includes(searchTerm);
     }
 
-    const isVisible = matchesCategory && matchesSearch;
+    const isMatch = matchesCategory && matchesSearch;
+    item.dataset.match = isMatch ? '1' : '0';
+    // a station is shown only if it matches AND its section is open (searching opens everything)
+    const isVisible = isMatch && (searchTerm !== '' || expandedSections.has(station.section));
     item.style.display = isVisible ? 'flex' : 'none';
-    if (isVisible) {
-      visibleCountBySection[station.section] =
-        (visibleCountBySection[station.section] || 0) + 1;
+    if (isMatch) {
+      matchCountBySection[station.section] = (matchCountBySection[station.section] || 0) + 1;
     }
   });
 
   const headers = stationList.querySelectorAll('.section-tab-header');
   headers.forEach((header) => {
     const secId = header.dataset.section;
-    const count = visibleCountBySection[secId] || 0;
+    const count = matchCountBySection[secId] || 0;
+    const open = searchTerm !== '' || expandedSections.has(secId);
     header.style.display = count > 0 ? 'flex' : 'none';
+    header.classList.toggle('collapsed', !open);
+    header.setAttribute('aria-expanded', open ? 'true' : 'false');
     const countBadge = header.querySelector('.section-tab-count');
-    if (countBadge) {
-      countBadge.textContent = count;
-    }
+    if (countBadge) countBadge.textContent = count;
+  });
+
+  markActiveSection();
+}
+
+function markActiveSection() {
+  const current = stations[currentStationIndex];
+  stationList.querySelectorAll('.section-tab-header').forEach((header) => {
+    header.classList.toggle('has-active', !!current && header.dataset.section === current.section);
   });
 }
 
