@@ -2738,8 +2738,12 @@ themeToggle.addEventListener('click', async () => {
   const currentTheme = document.documentElement.getAttribute('data-theme');
   const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
 
-  document.documentElement.setAttribute('data-theme', newTheme);
+  const root = document.documentElement;
+  root.classList.add('theme-anim');
+  clearTimeout(window.__themeAnimTimer);
+  root.setAttribute('data-theme', newTheme);
   updateThemeIcon(newTheme);
+  window.__themeAnimTimer = setTimeout(() => root.classList.remove('theme-anim'), 450);
   store.set({ theme: newTheme }); applySystemBars(newTheme);
 });
 
