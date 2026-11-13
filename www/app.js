@@ -34,6 +34,8 @@ function applySystemBars(theme) {
 // ── Media notification (MediaStyle + MediaSession: shows on lock screen with controls) ──
 const Media = NativePlugins.MediaControl;
 let mediaPermAsked = false;
+let usingNative = false;   // true while the native (ExoPlayer) service plays the stream
+let nativeWaiter = null;
 
 function mediaLabels() {
   const ar = currentLang === 'ar' || currentLang === 'ur';
@@ -54,6 +56,64 @@ async function mediaShow(playing) {
 async function mediaHide() {
   if (!Media) return;
   try { await Media.hide(); } catch (_) {}
+}
+
+function mediaMeta() {
+  const n = stationNotifText();
+  return { title: n.title, subtitle: n.body, ...mediaLabels() };
+}
+
+function nativePlay(urls) {
+  return new Promise((resolve) => {
+    if (nativeWaiter) nativeWaiter({ success: false, aborted: true });
+    let done = false;
+    let tm = null;
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      if (nativeWaiter === finish) nativeWaiter = null;
+      clearTimeout(tm);
+      resolve(r);
+    };
+    tm = setTimeout(() => finish({ success: false, error: 'TIMEOUT' }), 60000);
+    nativeWaiter = finish;
+    Media.playStream({ urls, volume: audio.volume, ...mediaMeta() })
+      .catch(() => finish({ success: false, error: 'NATIVE' }));
+  });
+}
+
+function syncUiPlaying(p) {
+  activePlayRequestId++;
+  hasConnectionError = false;
+  isPlaying = p;
+  setLoadingState(false);
+  updatePlayState();
+}
+
+function syncUiFailed() {
+  activePlayRequestId++;
+  isPlaying = false;
+  hasConnectionError = true;
+  setLoadingState(false);
+  updatePlayState();
+  refreshStatusLabel();
+}
+
+if (Media && Media.addListener) {
+  // Events from the native player (it keeps running even when the web view is throttled)
+  Media.addListener('state', (ev) => {
+    const st = ev && ev.state;
+    if (st === 'started') {
+      if (nativeWaiter) nativeWaiter({ success: true });
+    } else if (st === 'failed') {
+      if (nativeWaiter) nativeWaiter({ success: false, error: 'Stream error' });
+      else syncUiFailed();
+    } else if (st === 'paused') {
+      syncUiPlaying(false);
+    } else if (st === 'resumed') {
+      syncUiPlaying(true);
+    }
+  });
 }
 
 if (Media && Media.addListener) {
@@ -98,6 +158,9 @@ function applyVolume(vol) {
   const clamped = Math.max(0, Math.min(1, Number(vol ?? 1)));
   engineVolume = clamped;
   audio.volume = clamped === 0 ? 0 : Math.min(1, Math.pow(clamped, 1.7));
+  if (usingNative && Media && Media.setVolume) {
+    try { Media.setVolume({ volume: audio.volume }); } catch (_) {}
+  }
 }
 applyVolume(1.0);
 
@@ -197,7 +260,26 @@ async function enginePlay(message) {
   lastPlayArgs = { url: message.url, fallbackUrls: message.fallbackUrls || [] };
   store.set({ currentStation: message.stationIndex, volume: message.volume });
 
-  // start the foreground service first so Android keeps us alive while the stream connects
+  // 1) Preferred: native player inside the foreground service (survives screen-off / throttling)
+  if (Media && Media.playStream) {
+    currentPlayId++;
+    clearStallTimer();
+    try { audio.pause(); } catch (_) {}
+    if (message.volume !== undefined && message.volume !== null) applyVolume(message.volume);
+    if (!mediaPermAsked) {
+      mediaPermAsked = true;
+      try { await Media.requestPermission(); } catch (_) {}
+    }
+    usingNative = true;
+    applyVolume(engineVolume);
+    const urls = buildCandidateUrls(message.url, message.fallbackUrls || []);
+    const r = await nativePlay(urls);
+    if (r && r.aborted) return { success: false, aborted: true };
+    if (r && r.success) return { success: true };
+    usingNative = false; // could not start natively -> fall back to the web view player below
+  }
+
+  // 2) Fallback: web view <audio>
   mediaShow(true);
 
   const res = await playStation(message.url, message.volume, message.fallbackUrls || []);
@@ -216,7 +298,15 @@ function enginePause(hideNotification) {
   clearStallTimer();
   clearReconnectTimer();
   audio.pause();
-  if (hideNotification) mediaHide(); else mediaShow(false);
+  if (nativeWaiter) nativeWaiter({ success: false, aborted: true });
+  if (usingNative) {
+    if (hideNotification) mediaHide();
+    else { try { Media.pauseStream(); } catch (_) {} }
+  } else if (hideNotification) {
+    mediaHide();
+  } else {
+    mediaShow(false);
+  }
   return { success: true };
 }
 
@@ -295,6 +385,7 @@ audio.addEventListener('error', () => { if (wantPlaying) scheduleReconnect(); })
 window.addEventListener('online', () => { if (wantPlaying && (audio.paused || audio.error)) scheduleReconnect(500); });
 
 function scheduleReconnect(delay) {
+  if (usingNative) return;
   if (!wantPlaying || !lastPlayArgs || reconnectTimer) return;
   if (reconnectAttempts >= 6) {
     wantPlaying = false;
@@ -2676,3 +2767,47 @@ async function init() {
 }
 
 init();
+
+// ── Re-sync the UI with the native player (after unlock / app resume / page reload) ──
+async function syncFromNative() {
+  if (!Media || !Media.getStatus) return;
+  try {
+    const st = await Media.getStatus();
+    if (st && st.running && st.nativeMode) {
+      usingNative = true;
+      wantPlaying = !!st.playing;
+      if (isPlaying !== !!st.playing || hasConnectionError) syncUiPlaying(!!st.playing);
+    } else if (usingNative && isPlaying) {
+      syncUiPlaying(false); // the service is gone -> nothing is playing any more
+    }
+  } catch (_) {}
+}
+
+if (AppPlugin && AppPlugin.addListener) {
+  AppPlugin.addListener('appStateChange', (st) => { if (st && st.isActive) syncFromNative(); });
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncFromNative(); });
+setTimeout(syncFromNative, 600);
+
+// ── Hidden diagnostics: long-press the ﷽ symbol for ~1.5 s to see the recent playback events ──
+(function setupDiagnostics() {
+  const el = document.querySelector('.header-ornament');
+  if (!el || !Media || !Media.getLog) return;
+  let timer = null;
+  const start = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        const r = await Media.getLog();
+        window.alert((r && r.log) ? r.log : 'No events yet');
+      } catch (_) {}
+    }, 1500);
+  };
+  const stop = () => clearTimeout(timer);
+  el.addEventListener('touchstart', start, { passive: true });
+  el.addEventListener('touchend', stop);
+  el.addEventListener('touchcancel', stop);
+  el.addEventListener('mousedown', start);
+  el.addEventListener('mouseup', stop);
+  el.addEventListener('mouseleave', stop);
+})();

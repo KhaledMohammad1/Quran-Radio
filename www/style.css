@@ -632,3 +632,4 @@ html[dir="ltr"] .section-tab-header.collapsed .section-chevron { transform: rota
   content: ' ●'; color: var(--gold-primary); font-size: 8px; vertical-align: middle;
 }
 .section-tab-title { font-size: 13px; }
+
