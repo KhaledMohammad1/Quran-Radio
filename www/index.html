@@ -76,6 +76,28 @@
 
   </div>
 
+  <script>
+    // Safety net: if anything crashes while the app starts, show the error instead of an empty list.
+    window.__showFatal = function (msg) {
+      try {
+        var l = document.getElementById('stationList');
+        if (l && !l.children.length) {
+          l.innerHTML = '';
+          var d = document.createElement('div');
+          d.style.cssText = 'padding:16px;font-size:12px;direction:ltr;text-align:left;user-select:text;white-space:pre-wrap;color:#c0392b;word-break:break-word';
+          d.textContent = msg;
+          l.appendChild(d);
+        }
+      } catch (e) {}
+    };
+    window.addEventListener('error', function (e) {
+      window.__showFatal('JS error: ' + (e && e.message) + ' (line ' + (e && e.lineno) + ')');
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e && e.reason;
+      window.__showFatal('Error: ' + ((r && r.message) || r));
+    });
+  </script>
   <script src="app.js"></script>
 </body>
 </html>

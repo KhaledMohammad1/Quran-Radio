@@ -1,3 +1,415 @@
+// Quran Radio — Android app (generated from the Chrome extension)
+// Quran Radio — Android app (generated from the Chrome extension)
+
+// ═══════════════════════════════════════════════════════════
+//  Android app layer: storage + audio engine + background service
+//  (replaces chrome.storage / background.js / offscreen.js)
+// ═══════════════════════════════════════════════════════════
+const store = {
+  get(key) {
+    try {
+      const raw = localStorage.getItem('qr_' + key);
+      return { [key]: raw === null ? undefined : JSON.parse(raw) };
+    } catch (_) { return { [key]: undefined }; }
+  },
+  set(obj) {
+    try { Object.keys(obj).forEach((k) => localStorage.setItem('qr_' + k, JSON.stringify(obj[k]))); } catch (_) {}
+  }
+};
+
+const Cap = window.Capacitor;
+const isNative = !!(Cap && Cap.isNativePlatform && Cap.isNativePlatform());
+const NativePlugins = (Cap && Cap.Plugins) || {};
+const SystemBars = NativePlugins.SystemBars;
+const AppPlugin = NativePlugins.App;
+
+function applySystemBars(theme) {
+  try {
+    if (SystemBars && SystemBars.setStyle) {
+      SystemBars.setStyle({ style: theme === 'dark' ? 'DARK' : 'LIGHT' });
+    }
+  } catch (_) {}
+}
+
+// ── Media notification (MediaStyle + MediaSession: shows on lock screen with controls) ──
+const Media = NativePlugins.MediaControl;
+let mediaPermAsked = false;
+let usingNative = false;   // true while the native (ExoPlayer) service plays the stream
+let nativeWaiter = null;
+
+function mediaLabels() {
+  const ar = currentLang === 'ar' || currentLang === 'ur';
+  return ar
+    ? { lblPlay: 'تشغيل', lblPause: 'إيقاف مؤقت', lblNext: 'التالي', lblPrev: 'السابق', lblStop: 'إغلاق' }
+    : { lblPlay: 'Play', lblPause: 'Pause', lblNext: 'Next', lblPrev: 'Previous', lblStop: 'Close' };
+}
+
+async function mediaShow(playing) {
+  if (!Media) return;
+  try {
+    if (!mediaPermAsked) { mediaPermAsked = true; await Media.requestPermission(); }
+    const n = stationNotifText();
+    await Media.show({ title: n.title, subtitle: n.body, playing, ...mediaLabels() });
+  } catch (_) {}
+}
+
+async function mediaHide() {
+  if (!Media) return;
+  try { await Media.hide(); } catch (_) {}
+}
+
+function mediaMeta() {
+  const n = stationNotifText();
+  return { title: n.title, subtitle: n.body, ...mediaLabels() };
+}
+
+function nativePlay(urls) {
+  return new Promise((resolve) => {
+    if (nativeWaiter) nativeWaiter({ success: false, aborted: true });
+    let done = false;
+    let tm = null;
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      if (nativeWaiter === finish) nativeWaiter = null;
+      clearTimeout(tm);
+      resolve(r);
+    };
+    tm = setTimeout(() => finish({ success: false, error: 'TIMEOUT' }), 60000);
+    nativeWaiter = finish;
+    Media.playStream({ urls, volume: audio.volume, ...mediaMeta() })
+      .catch(() => finish({ success: false, error: 'NATIVE' }));
+  });
+}
+
+function syncUiPlaying(p) {
+  activePlayRequestId++;
+  hasConnectionError = false;
+  isPlaying = p;
+  setLoadingState(false);
+  updatePlayState();
+}
+
+function syncUiFailed() {
+  activePlayRequestId++;
+  isPlaying = false;
+  hasConnectionError = true;
+  setLoadingState(false);
+  updatePlayState();
+  refreshStatusLabel();
+}
+
+if (Media && Media.addListener) {
+  // Events from the native player (it keeps running even when the web view is throttled)
+  Media.addListener('state', (ev) => {
+    const st = ev && ev.state;
+    if (st === 'started') {
+      if (nativeWaiter) nativeWaiter({ success: true });
+    } else if (st === 'failed') {
+      if (nativeWaiter) nativeWaiter({ success: false, error: 'Stream error' });
+      else syncUiFailed();
+    } else if (st === 'paused') {
+      syncUiPlaying(false);
+    } else if (st === 'resumed') {
+      syncUiPlaying(true);
+    }
+  });
+}
+
+if (Media && Media.addListener) {
+  Media.addListener('action', (ev) => {
+    const a = ev && ev.action;
+    if (a === 'play') {
+      if (!isPlaying) startPlaybackForCurrentStation();
+    } else if (a === 'pause') {
+      pauseFromExternal(false);
+    } else if (a === 'next') {
+      stepStation(1);
+    } else if (a === 'prev') {
+      stepStation(-1);
+    } else if (a === 'stop') {
+      pauseFromExternal(true);
+      try { if (AppPlugin && AppPlugin.exitApp) AppPlugin.exitApp(); } catch (_) {}
+    }
+  });
+}
+
+// Back button: send app to background instead of killing it (so audio keeps playing)
+if (AppPlugin && AppPlugin.addListener) {
+  AppPlugin.addListener('backButton', () => {
+    if (!langMenu.hidden) { closeLangMenu(); return; }
+    try { AppPlugin.minimizeApp(); } catch (_) {}
+  });
+}
+
+// ── Audio engine (ported from offscreen.js) ──
+const audio = new Audio();
+audio.preload = 'none';
+
+let currentPlayId = 0;
+let stallTimer = null;
+let engineVolume = 1.0;
+let wantPlaying = false;
+let lastPlayArgs = null;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+
+function applyVolume(vol) {
+  const clamped = Math.max(0, Math.min(1, Number(vol ?? 1)));
+  engineVolume = clamped;
+  audio.volume = clamped === 0 ? 0 : Math.min(1, Math.pow(clamped, 1.7));
+  if (usingNative && Media && Media.setVolume) {
+    try { Media.setVolume({ volume: audio.volume }); } catch (_) {}
+  }
+}
+applyVolume(1.0);
+
+function clearStallTimer() { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } }
+function clearReconnectTimer() { if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } }
+
+function buildCandidateUrls(url, fallbackUrls = []) {
+  const candidates = [];
+  const addUrl = (u) => {
+    if (!u || typeof u !== 'string') return;
+    if (u.startsWith('mp3quran-server:')) return; // live streams only
+    if (!candidates.includes(u)) candidates.push(u);
+  };
+
+  if (url && url.includes('://qurango.net/radio/')) {
+    addUrl(url.replace('://qurango.net/radio/', '://backup.qurango.net/radio/'));
+    addUrl(url);
+  } else if (url && url.includes('://backup.qurango.net/radio/')) {
+    addUrl(url);
+    addUrl(url.replace('://backup.qurango.net/radio/', '://qurango.net/radio/'));
+  } else if (url) {
+    addUrl(url);
+  }
+
+  if (Array.isArray(fallbackUrls)) fallbackUrls.forEach(addUrl);
+  return candidates;
+}
+
+function tryPlaySingleUrl(targetUrl, playId, timeoutMs = 6000) {
+  return new Promise((resolve, reject) => {
+    if (playId !== currentPlayId) return reject(new Error('ABORTED'));
+
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; reject(new Error('TIMEOUT')); }
+    }, timeoutMs);
+
+    audio.pause();
+    applyVolume(engineVolume);
+    audio.src = targetUrl;
+    audio.load();
+    audio.play()
+      .then(() => { if (settled) return; settled = true; clearTimeout(timer); resolve(true); })
+      .catch((err) => { if (settled) return; settled = true; clearTimeout(timer); reject(err); });
+  });
+}
+
+async function playStation(url, volume, fallbackUrls = []) {
+  const playId = ++currentPlayId;
+  clearStallTimer();
+  if (volume !== undefined && volume !== null) applyVolume(volume);
+
+  const candidates = buildCandidateUrls(url, fallbackUrls);
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    if (playId !== currentPlayId) return { success: false, aborted: true };
+    try {
+      await tryPlaySingleUrl(candidate, playId, 6000);
+      if (playId !== currentPlayId) return { success: false, aborted: true };
+      return { success: true, activeUrl: candidate };
+    } catch (err) {
+      if (playId !== currentPlayId || (err && err.message === 'ABORTED')) return { success: false, aborted: true };
+      lastError = err;
+    }
+  }
+
+  if (candidates.length > 0 && playId === currentPlayId) {
+    const primary = candidates[0];
+    const retryUrl = primary.includes('serverkw.quran-uni.com')
+      ? primary
+      : primary + (primary.includes('?') ? '&' : '?') + '_t=' + Date.now();
+    try {
+      await tryPlaySingleUrl(retryUrl, playId, 7000);
+      if (playId !== currentPlayId) return { success: false, aborted: true };
+      return { success: true, activeUrl: retryUrl };
+    } catch (err) {
+      if (playId !== currentPlayId) return { success: false, aborted: true };
+      lastError = err;
+    }
+  }
+  return { success: false, error: (lastError && lastError.message) || 'Stream error' };
+}
+
+function stationNotifText() {
+  const st = stations[currentStationIndex] || stations[0];
+  return {
+    title: translateStationName(st.name),
+    body: translateStationSubtitle(st.subtitle)
+  };
+}
+
+async function enginePlay(message) {
+  wantPlaying = true;
+  clearReconnectTimer();
+  reconnectAttempts = 0;
+  lastPlayArgs = { url: message.url, fallbackUrls: message.fallbackUrls || [] };
+  store.set({ currentStation: message.stationIndex, volume: message.volume });
+
+  // 1) Preferred: native player inside the foreground service (survives screen-off / throttling)
+  if (Media && Media.playStream) {
+    currentPlayId++;
+    clearStallTimer();
+    try { audio.pause(); } catch (_) {}
+    if (message.volume !== undefined && message.volume !== null) applyVolume(message.volume);
+    if (!mediaPermAsked) {
+      mediaPermAsked = true;
+      try { await Media.requestPermission(); } catch (_) {}
+    }
+    usingNative = true;
+    applyVolume(engineVolume);
+    const urls = buildCandidateUrls(message.url, message.fallbackUrls || []);
+    const r = await nativePlay(urls);
+    if (r && r.aborted) return { success: false, aborted: true };
+    if (r && r.success) return { success: true };
+    usingNative = false; // could not start natively -> fall back to the web view player below
+  }
+
+  // 2) Fallback: web view <audio>
+  mediaShow(true);
+
+  const res = await playStation(message.url, message.volume, message.fallbackUrls || []);
+  if (res && res.aborted) return { success: false, aborted: true };
+  if (!res || !res.success) {
+    wantPlaying = false;
+    mediaHide();
+    return { success: false, error: (res && res.error) || 'Stream error' };
+  }
+  return { success: true };
+}
+
+function enginePause(hideNotification) {
+  wantPlaying = false;
+  currentPlayId++;
+  clearStallTimer();
+  clearReconnectTimer();
+  audio.pause();
+  if (nativeWaiter) nativeWaiter({ success: false, aborted: true });
+  if (usingNative) {
+    if (hideNotification) mediaHide();
+    else { try { Media.pauseStream(); } catch (_) {} }
+  } else if (hideNotification) {
+    mediaHide();
+  } else {
+    mediaShow(false);
+  }
+  return { success: true };
+}
+
+// Called from the notification / lock screen / headset buttons
+function pauseFromExternal(hideNotification) {
+  activePlayRequestId++;
+  enginePause(!!hideNotification);
+  hasConnectionError = false;
+  isPlaying = false;
+  setLoadingState(false);
+  updatePlayState();
+}
+
+function stepStation(dir) {
+  let list = Array.from(stationList.querySelectorAll('.station-item'))
+    .filter((el) => el.dataset.match !== '0')
+    .map((el) => parseInt(el.dataset.index, 10));
+  if (!list.length) list = stations.map((_, i) => i);
+  const pos = list.indexOf(currentStationIndex);
+  const next = pos === -1
+    ? list[dir > 0 ? 0 : list.length - 1]
+    : list[(pos + dir + list.length) % list.length];
+  expandedSections.add(stations[next].section);
+  selectStation(next);
+  filterStations(searchInput.value);
+  const el = stationList.querySelector('.station-item.active');
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
+async function engineHandle(message) {
+  switch (message.action) {
+    case 'play': return enginePlay(message);
+    case 'pause': return enginePause(false);
+    case 'setVolume': {
+      const v = Math.max(0, Math.min(1, Number(message.volume ?? 1)));
+      applyVolume(v);
+      store.set({ volume: v });
+      return { success: true, volume: v };
+    }
+    case 'getState': {
+      const st = store.get('currentStation').currentStation;
+      const vol = store.get('volume').volume;
+      return {
+        success: true,
+        state: {
+          isPlaying: wantPlaying && !audio.paused,
+          currentStation: typeof st === 'number' ? st : 0,
+          volume: typeof vol === 'number' ? vol : 1.0
+        }
+      };
+    }
+    default: return { success: false, error: 'Unknown action' };
+  }
+}
+
+// Live stream ended unexpectedly -> reconnect
+audio.addEventListener('ended', () => { if (wantPlaying) scheduleReconnect(); });
+
+audio.addEventListener('stalled', () => {
+  clearStallTimer();
+  const stalledPlayId = currentPlayId;
+  const stalledSrc = audio.src;
+  stallTimer = setTimeout(() => {
+    if (stalledPlayId === currentPlayId && stalledSrc && audio.src === stalledSrc && !audio.paused && audio.readyState < 3) {
+      audio.load();
+      applyVolume(engineVolume);
+      audio.play().catch(() => {});
+    }
+  }, 4000);
+});
+
+audio.addEventListener('playing', () => { reconnectAttempts = 0; });
+
+// Auto-reconnect when the stream drops (mobile networks)
+audio.addEventListener('error', () => { if (wantPlaying) scheduleReconnect(); });
+window.addEventListener('online', () => { if (wantPlaying && (audio.paused || audio.error)) scheduleReconnect(500); });
+
+function scheduleReconnect(delay) {
+  if (usingNative) return;
+  if (!wantPlaying || !lastPlayArgs || reconnectTimer) return;
+  if (reconnectAttempts >= 6) {
+    wantPlaying = false;
+    mediaShow(false);
+    activePlayRequestId++;
+    isPlaying = false;
+    hasConnectionError = true;
+    setLoadingState(false);
+    updatePlayState();
+    return;
+  }
+  reconnectAttempts++;
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (!wantPlaying) return;
+    const res = await playStation(lastPlayArgs.url, engineVolume, lastPlayArgs.fallbackUrls);
+    if (res && res.success) reconnectAttempts = 0;
+    else if (!(res && res.aborted) && wantPlaying) scheduleReconnect();
+  }, delay || 2500);
+}
+
+
+
+// ═══════════ UI (from popup.js) ═══════════
 // popup.js — Quran Radio (20 Riwayat + Senior Reciters + Live Radio Broadcasts)
 
 const SECTIONS = [
@@ -2025,12 +2437,12 @@ async function applyLanguage(lang, save = false) {
   filterStations(searchInput.value);
 
   if (save) {
-    await chrome.storage.local.set({ lang: currentLang });
+    store.set({ lang: currentLang });
   }
 }
 
 async function loadLanguage() {
-  const data = await chrome.storage.local.get('lang');
+  const data = store.get('lang');
   const savedLang = data.lang || 'ar';
   await applyLanguage(savedLang, false);
 }
@@ -2306,23 +2718,16 @@ searchInput.addEventListener('input', (e) => {
 });
 
 function sendMessage(message) {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve(null);
-      } else {
-        resolve(response);
-      }
-    });
-  });
+  return engineHandle(message);
 }
 
 // ⭐ دوال الوضع الليلي ⭐
 async function loadTheme() {
-  const data = await chrome.storage.local.get('theme');
+  const data = store.get('theme');
   const savedTheme = data.theme || 'light';
   document.documentElement.setAttribute('data-theme', savedTheme);
   updateThemeIcon(savedTheme);
+  applySystemBars(savedTheme);
 }
 
 function updateThemeIcon(theme) {
@@ -2339,7 +2744,7 @@ themeToggle.addEventListener('click', async () => {
   root.setAttribute('data-theme', newTheme);
   updateThemeIcon(newTheme);
   window.__themeAnimTimer = setTimeout(() => root.classList.remove('theme-anim'), 450);
-  await chrome.storage.local.set({ theme: newTheme });
+  store.set({ theme: newTheme }); applySystemBars(newTheme);
 });
 
 // ⭐ دالة التشغيل الأساسية ⭐
@@ -2365,4 +2770,58 @@ async function init() {
   }
 }
 
-init();
+async function bootstrap() {
+  try {
+    await init();
+  } catch (err) {
+    // A saved value may be corrupt -> clear the app's saved settings and try once more
+    try { Object.keys(localStorage).filter((k) => k.indexOf('qr_') === 0).forEach((k) => localStorage.removeItem(k)); } catch (_) {}
+    try {
+      currentLang = 'ar';
+      await applyLanguage('ar', false);
+      updateStationUI();
+      updatePlayState();
+    } catch (err2) {
+      if (window.__showFatal) window.__showFatal('Start error: ' + (err2 && err2.message) + ' / ' + (err && err.message));
+    }
+  }
+
+  // Last resort: the list must never stay empty
+  setTimeout(() => {
+    try {
+      if (!stationList.children.length) {
+        buildCategoryTabs();
+        buildStationList();
+        filterStations('');
+        if (!stationList.children.length && window.__showFatal) {
+          window.__showFatal('List is empty. stations=' + stations.length + ', lang=' + currentLang);
+        }
+      }
+    } catch (e) {
+      if (window.__showFatal) window.__showFatal('Rebuild error: ' + (e && e.message));
+    }
+  }, 2500);
+}
+
+bootstrap();
+
+// ── Re-sync the UI with the native player (after unlock / app resume / page reload) ──
+async function syncFromNative() {
+  if (!Media || !Media.getStatus) return;
+  try {
+    const st = await Media.getStatus();
+    if (st && st.running && st.nativeMode) {
+      usingNative = true;
+      wantPlaying = !!st.playing;
+      if (isPlaying !== !!st.playing || hasConnectionError) syncUiPlaying(!!st.playing);
+    } else if (usingNative && isPlaying) {
+      syncUiPlaying(false); // the service is gone -> nothing is playing any more
+    }
+  } catch (_) {}
+}
+
+if (AppPlugin && AppPlugin.addListener) {
+  AppPlugin.addListener('appStateChange', (st) => { if (st && st.isActive) syncFromNative(); });
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncFromNative(); });
+setTimeout(syncFromNative, 600);
