@@ -2788,26 +2788,3 @@ if (AppPlugin && AppPlugin.addListener) {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) syncFromNative(); });
 setTimeout(syncFromNative, 600);
-
-// ── Hidden diagnostics: long-press the ﷽ symbol for ~1.5 s to see the recent playback events ──
-(function setupDiagnostics() {
-  const el = document.querySelector('.header-ornament');
-  if (!el || !Media || !Media.getLog) return;
-  let timer = null;
-  const start = () => {
-    clearTimeout(timer);
-    timer = setTimeout(async () => {
-      try {
-        const r = await Media.getLog();
-        window.alert((r && r.log) ? r.log : 'No events yet');
-      } catch (_) {}
-    }, 1500);
-  };
-  const stop = () => clearTimeout(timer);
-  el.addEventListener('touchstart', start, { passive: true });
-  el.addEventListener('touchend', stop);
-  el.addEventListener('touchcancel', stop);
-  el.addEventListener('mousedown', start);
-  el.addEventListener('mouseup', stop);
-  el.addEventListener('mouseleave', stop);
-})();
