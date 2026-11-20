@@ -75,7 +75,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: QuranRadio-APK
-          path: QuranRadio-v1.apk
+          path: QuranRadio-V1.apk
           if-no-files-found: error
           retention-days: 90
 
