@@ -2944,7 +2944,7 @@ async function checkForUpdate(force) {
     const latest = parseInt(m[1], 10);
     if (latest <= updateCfg.build || latest === dismissedBuild) return;
     const asset = (rel.assets || []).find((a) => /\.apk$/i.test(a.name));
-    showUpdateDialog(latest, asset ? asset.browser_download_url : rel.html_url, rel.body, rel.name || `v${latest}`);
+    showUpdateDialog(latest, asset ? asset.browser_download_url : rel.html_url, rel.body, rel.name || `V${latest}`);
   } catch (_) {}
 }
 
