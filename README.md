@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/Built%20with-Capacitor-119EFF?logo=capacitor&logoColor=white" alt="Capacitor" />
   <img src="https://img.shields.io/badge/Language-Multilingual-blue" alt="Multilingual" />
-  <img src="https://img.shields.io/badge/Release-v1-informational" alt="Release v1" />
+  <img src="https://img.shields.io/badge/Release-V1-informational" alt="Release V1" />
 </p>
 
 <p align="center">
@@ -121,7 +121,7 @@ Never commit keystores, passwords, signing keys or other secrets to the reposito
 
 ### Versioning
 
-- The user-facing app version name is currently **v1**.
+- The user-facing app version name is currently **V1**.
 - Android's internal `versionCode` increases with each workflow run so newer APKs can be installed as updates.
 - Release tags use the build number (for example, `build-23`) to keep each release uniquely identifiable.
 
