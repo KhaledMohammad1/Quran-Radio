@@ -596,6 +596,12 @@ public class MediaPlaybackService extends Service {
         if (buffering == b) return;
         buffering = b;
         if (nativeMode && playing) refresh();
+        // Keep the main app status in sync with the native ExoPlayer state.
+        if (b) {
+            emit("buffering");
+        } else if (startedReported) {
+            emit("live");
+        }
     }
 
     /** The status indicator is a separate fixed-position view, never appended to station text. */

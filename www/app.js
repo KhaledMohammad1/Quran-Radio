@@ -120,6 +120,10 @@ if (Media && Media.addListener) {
     const st = ev && ev.state;
     if (st === 'started') {
       if (nativeWaiter) nativeWaiter({ success: true });
+    } else if (st === 'buffering') {
+      if (!nativeWaiter) setLoadingState(true);
+    } else if (st === 'live') {
+      if (!nativeWaiter) setLoadingState(false);
     } else if (st === 'failed') {
       if (nativeWaiter) nativeWaiter({ success: false, error: 'Stream error' });
       else syncUiFailed();
