@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       APP_VERSION_CODE: ${{ github.run_number }}
-      APP_VERSION_NAME: v1
+      APP_VERSION_NAME: V1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,7 +69,7 @@ jobs:
           ./gradlew assembleRelease --no-daemon
 
       - name: Rename APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk QuranRadio-v1.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk QuranRadio-V1.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -125,7 +125,7 @@ jobs:
         with:
           tag_name: build-${{ steps.source.outputs.run_number }}
           target_commitish: ${{ steps.source.outputs.head_sha }}
-          name: v1
+          name: V1
           body: ${{ inputs.notes }}
           files: release-assets/*.apk
           overwrite_files: true
