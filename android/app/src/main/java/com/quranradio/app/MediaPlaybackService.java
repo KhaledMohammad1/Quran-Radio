@@ -97,6 +97,7 @@ public class MediaPlaybackService extends Service {
     static final String ACTION_PLAY_STREAM = "com.quranradio.app.PLAY_STREAM";
     static final String ACTION_PAUSE_STREAM = "com.quranradio.app.PAUSE_STREAM";
     static final String ACTION_SET_VOLUME = "com.quranradio.app.SET_VOLUME";
+    static final String ACTION_UPDATE_META = "com.quranradio.app.UPDATE_META";
 
     private static final String CHANNEL_ID = "quran_radio_media";
     private static final int NOTIF_ID = 1001;
@@ -166,6 +167,12 @@ public class MediaPlaybackService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : null;
+
+        if (ACTION_UPDATE_META.equals(action)) {
+            if (intent != null) readMeta(intent);
+            refresh();
+            return START_NOT_STICKY;
+        }
 
         if (ACTION_PLAY_STREAM.equals(action)) {
             readMeta(intent);

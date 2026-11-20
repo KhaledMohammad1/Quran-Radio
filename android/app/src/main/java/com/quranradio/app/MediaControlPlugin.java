@@ -97,6 +97,21 @@ public class MediaControlPlugin extends Plugin implements MediaPlaybackService.L
         }
     }
 
+    /** Update notification text and controls without changing the active playback state. */
+    @PluginMethod
+    public void updateMetadata(PluginCall call) {
+        if (MediaPlaybackService.running) {
+            try {
+                Intent i = baseIntent(MediaPlaybackService.ACTION_UPDATE_META, call);
+                getContext().startService(i);
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+                return;
+            }
+        }
+        call.resolve();
+    }
+
     /** Play a live stream natively. The outcome arrives as a "state" event (started / failed). */
     @PluginMethod
     public void playStream(PluginCall call) {

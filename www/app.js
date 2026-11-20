@@ -68,6 +68,11 @@ function mediaMeta() {
   return { title: n.title, subtitle: n.body, ...mediaLabels() };
 }
 
+async function mediaUpdateMetadata() {
+  if (!Media || !Media.updateMetadata) return;
+  try { await Media.updateMetadata(mediaMeta()); } catch (_) {}
+}
+
 function nativePlay(urls) {
   return new Promise((resolve) => {
     if (nativeWaiter) nativeWaiter({ success: false, aborted: true });
@@ -2441,6 +2446,8 @@ async function applyLanguage(lang, save = false) {
   updateStationUI();
   refreshStatusLabel();
   filterStations(searchInput.value);
+  // Update the native notification labels immediately without restarting playback.
+  mediaUpdateMetadata();
 
   if (save) {
     store.set({ lang: currentLang });
@@ -2838,6 +2845,8 @@ const UPD_STRINGS = {
   ar: {
     title: 'تحديث جديد متاح',
     body: 'نسخة أحدث من التطبيق جاهزة. اضغط تحديث لتحميلها، ثم افتح الملف لتثبيتها فوق النسخة الحالية.',
+    currentVersion: 'الإصدار الحالي:',
+    latestVersion: 'أحدث إصدار:',
     notes: 'الجديد:',
     now: 'تحديث الآن',
     later: 'لاحقاً'
@@ -2845,6 +2854,8 @@ const UPD_STRINGS = {
   en: {
     title: 'New update available',
     body: 'A newer version is ready. Tap Update to download it, then open the file to install it over the current one.',
+    currentVersion: 'Current version:',
+    latestVersion: 'Latest version:',
     notes: "What's new:",
     now: 'Update now',
     later: 'Later'
@@ -2886,7 +2897,7 @@ function openUpdateUrl(url) {
   try { window.location.href = url; } catch (_) {}
 }
 
-function showUpdateDialog(build, url, notes) {
+function showUpdateDialog(build, currentVersion, latestVersion, url, notes) {
   if (updateDialogEl) return;
   const overlay = document.createElement('div');
   overlay.className = 'upd-overlay';
@@ -2896,6 +2907,7 @@ function showUpdateDialog(build, url, notes) {
   box.innerHTML = `
     <h2 class="upd-title"></h2>
     <p class="upd-body"></p>
+    <p class="upd-versions"></p>
     <p class="upd-notes"></p>
     <div class="upd-actions">
       <button type="button" class="upd-later"></button>
@@ -2903,6 +2915,8 @@ function showUpdateDialog(build, url, notes) {
     </div>`;
   box.querySelector('.upd-title').textContent = updStr('title');
   box.querySelector('.upd-body').textContent = updStr('body');
+  box.querySelector('.upd-versions').textContent =
+    `${updStr('currentVersion')} ${currentVersion || '—'}   •   ${updStr('latestVersion')} ${latestVersion || '—'}`;
   const notesEl = box.querySelector('.upd-notes');
   if (cleanNotes) notesEl.textContent = `${updStr('notes')} ${cleanNotes}`; else notesEl.remove();
   box.querySelector('.upd-later').textContent = updStr('later');
@@ -2940,7 +2954,8 @@ async function checkForUpdate(force) {
     const latest = parseInt(m[1], 10);
     if (latest <= updateCfg.build || latest === dismissedBuild) return;
     const asset = (rel.assets || []).find((a) => /\.apk$/i.test(a.name));
-    showUpdateDialog(latest, asset ? asset.browser_download_url : rel.html_url, rel.body);
+    const latestVersion = String(rel.name || '').replace(/^Quran Radio\s*/i, '').trim() || rel.tag_name;
+    showUpdateDialog(latest, updateCfg.version || '—', latestVersion, asset ? asset.browser_download_url : rel.html_url, rel.body);
   } catch (_) {}
 }
 

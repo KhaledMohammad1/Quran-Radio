@@ -17,13 +17,15 @@ permissions:
   actions: read
   contents: write
 
+env:
+  APP_VERSION_NAME: "1.01"
+
 jobs:
   build:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
       APP_VERSION_CODE: ${{ github.run_number }}
-      APP_VERSION_NAME: V1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,8 +45,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Write update config (repo + build number)
-        run: echo '{"repo":"${{ github.repository }}","build":${{ github.run_number }}}' > www/config.json
+      - name: Write update config (repo, build number + version)
+        run: echo '{"repo":"${{ github.repository }}","build":${{ github.run_number }},"version":"${APP_VERSION_NAME}"}' > www/config.json
 
       - name: Install dependencies
         run: npm ci
@@ -69,13 +71,13 @@ jobs:
           ./gradlew assembleRelease --no-daemon
 
       - name: Rename APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk QuranRadio-V1.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk "QuranRadio-${APP_VERSION_NAME}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: QuranRadio-APK
-          path: QuranRadio-V1.apk
+          path: QuranRadio-${{ env.APP_VERSION_NAME }}.apk
           if-no-files-found: error
           retention-days: 90
 
@@ -125,7 +127,7 @@ jobs:
         with:
           tag_name: build-${{ steps.source.outputs.run_number }}
           target_commitish: ${{ steps.source.outputs.head_sha }}
-          name: V1
+          name: Quran Radio ${{ env.APP_VERSION_NAME }}
           body: ${{ inputs.notes }}
           files: release-assets/*.apk
           overwrite_files: true
