@@ -2888,7 +2888,7 @@ function openUpdateUrl(url) {
   try { window.location.href = url; } catch (_) {}
 }
 
-function showUpdateDialog(build, url, notes) {
+function showUpdateDialog(build, url, notes, versionLabel) {
   if (updateDialogEl) return;
   const overlay = document.createElement('div');
   overlay.className = 'upd-overlay';
@@ -2905,7 +2905,7 @@ function showUpdateDialog(build, url, notes) {
       <button type="button" class="upd-now"></button>
     </div>`;
   box.querySelector('.upd-title').textContent = updStr('title');
-  box.querySelector('.upd-version').textContent = `${updStr('version')} ${build}`;
+  box.querySelector('.upd-version').textContent = `${updStr('version')} ${versionLabel || build}`;
   box.querySelector('.upd-body').textContent = updStr('body');
   const notesEl = box.querySelector('.upd-notes');
   if (cleanNotes) notesEl.textContent = `${updStr('notes')} ${cleanNotes}`; else notesEl.remove();
@@ -2944,7 +2944,7 @@ async function checkForUpdate(force) {
     const latest = parseInt(m[1], 10);
     if (latest <= updateCfg.build || latest === dismissedBuild) return;
     const asset = (rel.assets || []).find((a) => /\.apk$/i.test(a.name));
-    showUpdateDialog(latest, asset ? asset.browser_download_url : rel.html_url, rel.body);
+    showUpdateDialog(latest, asset ? asset.browser_download_url : rel.html_url, rel.body, rel.name || `v${latest}`);
   } catch (_) {}
 }
 
