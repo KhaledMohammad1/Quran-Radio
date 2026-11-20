@@ -18,7 +18,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION_NAME: "1.01"
+  APP_VERSION_NAME: "1.02"
 
 jobs:
   build:

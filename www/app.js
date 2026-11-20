@@ -2854,8 +2854,6 @@ const UPD_STRINGS = {
   ar: {
     title: 'تحديث جديد متاح',
     body: 'نسخة أحدث من التطبيق جاهزة. اضغط تحديث لتحميلها، ثم افتح الملف لتثبيتها فوق النسخة الحالية.',
-    currentVersion: 'الإصدار الحالي:',
-    latestVersion: 'أحدث إصدار:',
     notes: 'الجديد:',
     now: 'تحديث الآن',
     later: 'لاحقاً'
@@ -2863,8 +2861,6 @@ const UPD_STRINGS = {
   en: {
     title: 'New update available',
     body: 'A newer version is ready. Tap Update to download it, then open the file to install it over the current one.',
-    currentVersion: 'Current version:',
-    latestVersion: 'Latest version:',
     notes: "What's new:",
     now: 'Update now',
     later: 'Later'
@@ -2916,7 +2912,6 @@ function showUpdateDialog(build, currentVersion, latestVersion, url, notes) {
   box.innerHTML = `
     <h2 class="upd-title"></h2>
     <p class="upd-body"></p>
-    <p class="upd-versions"></p>
     <p class="upd-notes"></p>
     <div class="upd-actions">
       <button type="button" class="upd-later"></button>
@@ -2924,8 +2919,6 @@ function showUpdateDialog(build, currentVersion, latestVersion, url, notes) {
     </div>`;
   box.querySelector('.upd-title').textContent = updStr('title');
   box.querySelector('.upd-body').textContent = updStr('body');
-  box.querySelector('.upd-versions').textContent =
-    `${updStr('currentVersion')} ${currentVersion || '—'}   •   ${updStr('latestVersion')} ${latestVersion || '—'}`;
   const notesEl = box.querySelector('.upd-notes');
   if (cleanNotes) notesEl.textContent = `${updStr('notes')} ${cleanNotes}`; else notesEl.remove();
   box.querySelector('.upd-later').textContent = updStr('later');
