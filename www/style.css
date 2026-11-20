@@ -638,3 +638,28 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease,
               box-shadow 0.3s ease, fill 0.3s ease, stroke 0.3s ease !important;
 }
+
+/* ─── Update dialog ─── */
+.upd-overlay {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.upd-box {
+  width: 100%; max-width: 360px;
+  background: var(--bg-card); color: var(--text-primary);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-card);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+  padding: 20px 18px 16px; text-align: center;
+}
+.upd-title { font-family: 'Amiri','Cairo',serif; font-size: 21px; color: var(--gold-primary); margin-bottom: 4px; }
+.upd-version { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; }
+.upd-body { font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
+.upd-notes { font-size: 12px; line-height: 1.6; color: var(--text-muted); margin-top: 8px; white-space: pre-wrap; }
+.upd-actions { display: flex; gap: 10px; margin-top: 16px; }
+.upd-actions button {
+  flex: 1; padding: 12px; border-radius: var(--radius-sm); border: none; outline: none;
+  font-family: 'Cairo', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.upd-now { background: var(--gold-primary); color: #fff; }
+.upd-later { background: var(--bg-surface); color: var(--text-primary); }

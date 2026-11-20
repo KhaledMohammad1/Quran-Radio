@@ -137,6 +137,7 @@ if (Media && Media.addListener) {
 // Back button: send app to background instead of killing it (so audio keeps playing)
 if (AppPlugin && AppPlugin.addListener) {
   AppPlugin.addListener('backButton', () => {
+    if (closeUpdateDialog()) return;
     if (!langMenu.hidden) { closeLangMenu(); return; }
     try { AppPlugin.minimizeApp(); } catch (_) {}
   });
@@ -2825,3 +2826,123 @@ if (AppPlugin && AppPlugin.addListener) {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) syncFromNative(); });
 setTimeout(syncFromNative, 600);
+
+// ═══════════ In-app update check (GitHub Releases) ═══════════
+const UPD_STRINGS = {
+  ar: {
+    title: 'تحديث جديد متاح',
+    body: 'نسخة أحدث من التطبيق جاهزة. اضغط تحديث لتحميلها، ثم افتح الملف لتثبيتها فوق النسخة الحالية.',
+    notes: 'الجديد:',
+    version: 'النسخة',
+    now: 'تحديث الآن',
+    later: 'لاحقاً'
+  },
+  en: {
+    title: 'New update available',
+    body: 'A newer version is ready. Tap Update to download it, then open the file to install it over the current one.',
+    notes: "What's new:",
+    version: 'Version',
+    now: 'Update now',
+    later: 'Later'
+  }
+};
+
+function updStr(key) {
+  const d = (currentLang === 'ar' || currentLang === 'ur') ? UPD_STRINGS.ar : UPD_STRINGS.en;
+  return d[key];
+}
+
+let updateCfg = null;
+let lastUpdateCheck = 0;
+let dismissedBuild = 0;
+let updateDialogEl = null;
+
+async function loadUpdateConfig() {
+  try {
+    const r = await fetch('config.json', { cache: 'no-store' });
+    updateCfg = await r.json();
+  } catch (_) {
+    updateCfg = null;
+  }
+}
+
+function closeUpdateDialog() {
+  if (!updateDialogEl) return false;
+  updateDialogEl.remove();
+  updateDialogEl = null;
+  return true;
+}
+
+function openUpdateUrl(url) {
+  const Browser = NativePlugins.Browser;
+  try {
+    if (Browser && Browser.open) { Browser.open({ url }); return; }
+  } catch (_) {}
+  // Capacitor opens external links in the system browser
+  try { window.location.href = url; } catch (_) {}
+}
+
+function showUpdateDialog(build, url, notes) {
+  if (updateDialogEl) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'upd-overlay';
+  const cleanNotes = String(notes || '').trim().slice(0, 280);
+  const box = document.createElement('div');
+  box.className = 'upd-box';
+  box.innerHTML = `
+    <h2 class="upd-title"></h2>
+    <p class="upd-version"></p>
+    <p class="upd-body"></p>
+    <p class="upd-notes"></p>
+    <div class="upd-actions">
+      <button type="button" class="upd-later"></button>
+      <button type="button" class="upd-now"></button>
+    </div>`;
+  box.querySelector('.upd-title').textContent = updStr('title');
+  box.querySelector('.upd-version').textContent = `${updStr('version')} ${build}`;
+  box.querySelector('.upd-body').textContent = updStr('body');
+  const notesEl = box.querySelector('.upd-notes');
+  if (cleanNotes) notesEl.textContent = `${updStr('notes')} ${cleanNotes}`; else notesEl.remove();
+  box.querySelector('.upd-later').textContent = updStr('later');
+  box.querySelector('.upd-now').textContent = updStr('now');
+  box.querySelector('.upd-later').addEventListener('click', () => {
+    dismissedBuild = build;
+    closeUpdateDialog();
+  });
+  box.querySelector('.upd-now').addEventListener('click', () => {
+    openUpdateUrl(url);
+    closeUpdateDialog();
+  });
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  updateDialogEl = overlay;
+}
+
+async function checkForUpdate(force) {
+  if (!isNative || updateDialogEl) return;
+  const now = Date.now();
+  if (!force && now - lastUpdateCheck < 30 * 60 * 1000) return;
+  lastUpdateCheck = now;
+
+  if (!updateCfg) await loadUpdateConfig();
+  if (!updateCfg || !updateCfg.repo || !updateCfg.build) return;
+
+  try {
+    const r = await fetch(`https://api.github.com/repos/${updateCfg.repo}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json' }
+    });
+    if (!r.ok) return;
+    const rel = await r.json();
+    const m = String(rel.tag_name || '').match(/(\d+)\s*$/);
+    if (!m) return;
+    const latest = parseInt(m[1], 10);
+    if (latest <= updateCfg.build || latest === dismissedBuild) return;
+    const asset = (rel.assets || []).find((a) => /\.apk$/i.test(a.name));
+    showUpdateDialog(latest, asset ? asset.browser_download_url : rel.html_url, rel.body);
+  } catch (_) {}
+}
+
+setTimeout(() => checkForUpdate(true), 3000);
+if (AppPlugin && AppPlugin.addListener) {
+  AppPlugin.addListener('appStateChange', (st) => { if (st && st.isActive) checkForUpdate(false); });
+}
