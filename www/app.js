@@ -65,7 +65,12 @@ async function mediaHide() {
 
 function mediaMeta() {
   const n = stationNotifText();
-  return { title: n.title, subtitle: n.body, ...mediaLabels() };
+  return {
+    title: n.title,
+    subtitle: n.body,
+    direction: document.documentElement.getAttribute('dir') || 'rtl',
+    ...mediaLabels()
+  };
 }
 
 async function mediaUpdateMetadata() {
@@ -2446,8 +2451,8 @@ async function applyLanguage(lang, save = false) {
   updateStationUI();
   refreshStatusLabel();
   filterStations(searchInput.value);
-  // Update the native notification labels immediately without restarting playback.
-  mediaUpdateMetadata();
+  // Await the native service update so the notification changes before the language switch finishes.
+  await mediaUpdateMetadata();
 
   if (save) {
     store.set({ lang: currentLang });

@@ -80,6 +80,7 @@ public class MediaControlPlugin extends Plugin implements MediaPlaybackService.L
         i.putExtra("lblNext", call.getString("lblNext", "Next"));
         i.putExtra("lblPrev", call.getString("lblPrev", "Previous"));
         i.putExtra("lblStop", call.getString("lblStop", "Stop"));
+        i.putExtra("direction", call.getString("direction", "rtl"));
         return i;
     }
 

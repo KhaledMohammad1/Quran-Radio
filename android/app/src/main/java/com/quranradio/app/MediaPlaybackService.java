@@ -24,6 +24,8 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.view.View;
+import android.widget.RemoteViews;
 
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
@@ -103,6 +105,21 @@ public class MediaPlaybackService extends Service {
     private static final int NOTIF_ID = 1001;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private boolean rtlLayout = true;
+    private boolean statusAnimationActive = false;
+    private int statusAnimationFrame = 0;
+    private final Runnable statusAnimationRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!playing) {
+                statusAnimationActive = false;
+                return;
+            }
+            statusAnimationFrame = (statusAnimationFrame + 1) % 4;
+            updateNotificationOnly();
+            handler.postDelayed(this, 450);
+        }
+    };
 
     private MediaSession session;
     private PowerManager.WakeLock wakeLock;
@@ -235,6 +252,7 @@ public class MediaPlaybackService extends Service {
 
     @Override
     public void onDestroy() {
+        stopStatusAnimation();
         running = false;
         sPlaying = false;
         sNativeMode = false;
@@ -580,13 +598,9 @@ public class MediaPlaybackService extends Service {
         if (nativeMode && playing) refresh();
     }
 
-    /** Keep the Arabic station subtitle RTL; isolate the English status tag at the visual left edge. */
+    /** The status indicator is a separate fixed-position view, never appended to station text. */
     private String displaySubtitle() {
-        if (!playing) return subtitle;
-        String tag = buffering ? "LOADING" : "LIVE";
-        if (subtitle.isEmpty()) return tag;
-        // Isolate the LTR status tag so it stays at the visual left edge of RTL text.
-        return subtitle + "  \u2066" + tag + "\u2069";
+        return subtitle;
     }
 
     private void readMeta(Intent intent) {
@@ -597,6 +611,7 @@ public class MediaPlaybackService extends Service {
         lblNext = nz(intent.getStringExtra("lblNext"), lblNext);
         lblPrev = nz(intent.getStringExtra("lblPrev"), lblPrev);
         lblStop = nz(intent.getStringExtra("lblStop"), lblStop);
+        rtlLayout = "rtl".equalsIgnoreCase(nz(intent.getStringExtra("direction"), "rtl"));
     }
 
     private void refresh() {
@@ -623,7 +638,9 @@ public class MediaPlaybackService extends Service {
 
         if (playing) {
             acquireLocks();
+            startStatusAnimation();
         } else {
+            stopStatusAnimation();
             releaseLocks();
             // keep the notification (with a Play button) but let the user swipe it away
             try {
@@ -634,6 +651,28 @@ public class MediaPlaybackService extends Service {
                 }
             } catch (Exception ignored) {}
         }
+    }
+
+    private void startStatusAnimation() {
+        if (statusAnimationActive) return;
+        statusAnimationActive = true;
+        statusAnimationFrame = 0;
+        handler.removeCallbacks(statusAnimationRunnable);
+        handler.postDelayed(statusAnimationRunnable, 450);
+    }
+
+    private void stopStatusAnimation() {
+        statusAnimationActive = false;
+        handler.removeCallbacks(statusAnimationRunnable);
+        statusAnimationFrame = 0;
+    }
+
+    /** Refresh only the posted notification; do not touch the player or MediaSession state. */
+    private void updateNotificationOnly() {
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.notify(NOTIF_ID, buildNotification());
+        } catch (Exception ignored) {}
     }
 
     private static String nz(String s) {
@@ -749,6 +788,8 @@ public class MediaPlaybackService extends Service {
         b.setSmallIcon(R.drawable.ic_stat_radio)
                 .setContentTitle(title)
                 .setContentText(displaySubtitle())
+                .setCustomContentView(buildCustomContent())
+                .setCustomBigContentView(buildCustomContent())
                 .setContentIntent(openAppIntent())
                 .setDeleteIntent(serviceIntent(ACTION_DISMISS, 9))
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
@@ -775,6 +816,34 @@ public class MediaPlaybackService extends Service {
         b.setStyle(style);
 
         return b.build();
+    }
+
+    private RemoteViews buildCustomContent() {
+        RemoteViews rv = new RemoteViews(getPackageName(), R.layout.notification_media_custom);
+        rv.setTextViewText(R.id.notif_title, title);
+        rv.setTextViewText(R.id.notif_subtitle, subtitle);
+        rv.setInt(R.id.notif_root, "setLayoutDirection",
+                rtlLayout ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+        rv.setInt(R.id.notif_status_group, "setLayoutDirection", View.LAYOUT_DIRECTION_LTR);
+
+        if (!playing) {
+            rv.setViewVisibility(R.id.notif_status_group, View.GONE);
+        } else {
+            rv.setViewVisibility(R.id.notif_status_group, View.VISIBLE);
+            if (buffering) {
+                rv.setTextViewText(R.id.notif_status_label, "Loading");
+                rv.setViewVisibility(R.id.notif_status_dot1, statusAnimationFrame >= 1 ? View.VISIBLE : View.GONE);
+                rv.setViewVisibility(R.id.notif_status_dot2, statusAnimationFrame >= 2 ? View.VISIBLE : View.GONE);
+                rv.setViewVisibility(R.id.notif_status_dot3, statusAnimationFrame >= 3 ? View.VISIBLE : View.GONE);
+            } else {
+                rv.setTextViewText(R.id.notif_status_label, "Live");
+                rv.setViewVisibility(R.id.notif_status_dot1,
+                        statusAnimationFrame % 2 == 0 ? View.VISIBLE : View.INVISIBLE);
+                rv.setViewVisibility(R.id.notif_status_dot2, View.GONE);
+                rv.setViewVisibility(R.id.notif_status_dot3, View.GONE);
+            }
+        }
+        return rv;
     }
 
     private void acquireLocks() {
