@@ -1,9 +1,22 @@
 name: Build Android APK
 
+# - Every push: builds a test APK (Actions > the run > Artifacts). Nothing reaches users.
+# - Manual run ("Run workflow"): builds AND publishes a Release, so users get the update popup.
 on:
   push:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      notes:
+        description: "What's new (shown to users in the update popup)"
+        required: false
+        default: ""
+        type: string
+      publish:
+        description: "Publish this build as a Release for users?"
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -61,18 +74,20 @@ jobs:
       - name: Rename APK
         run: cp android/app/build/outputs/apk/release/app-release.apk QuranRadio-1.${{ github.run_number }}.apk
 
-      - name: Upload APK (artifact)
+      - name: Upload APK (test artifact)
         uses: actions/upload-artifact@v4
         with:
           name: QuranRadio-APK
           path: QuranRadio-1.${{ github.run_number }}.apk
           if-no-files-found: error
 
-      - name: Publish GitHub Release (this is what the app checks for updates)
+      - name: Publish Release (manual runs only)
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
           name: Quran Radio 1.${{ github.run_number }}
-          body: ${{ github.event.head_commit.message }}
+          body: ${{ inputs.notes }}
           files: QuranRadio-1.${{ github.run_number }}.apk
           make_latest: true
