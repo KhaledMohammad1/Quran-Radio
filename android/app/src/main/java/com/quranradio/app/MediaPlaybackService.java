@@ -573,11 +573,13 @@ public class MediaPlaybackService extends Service {
         if (nativeMode && playing) refresh();
     }
 
-    /** "LIVE • subtitle" while playing, "Loading... • subtitle" while (re)connecting, plain subtitle when paused. */
+    /** Keep the Arabic station subtitle RTL; isolate the English status tag at the visual left edge. */
     private String displaySubtitle() {
         if (!playing) return subtitle;
-        String tag = buffering ? "Loading..." : "LIVE";
-        return subtitle.isEmpty() ? tag : tag + " \u2022 " + subtitle;
+        String tag = buffering ? "LOADING" : "LIVE";
+        if (subtitle.isEmpty()) return tag;
+        // Isolate the LTR status tag so it stays at the visual left edge of RTL text.
+        return subtitle + "  \u2066" + tag + "\u2069";
     }
 
     private void readMeta(Intent intent) {
