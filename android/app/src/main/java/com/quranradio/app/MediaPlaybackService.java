@@ -124,6 +124,8 @@ public class MediaPlaybackService extends Service {
     private boolean startedReported = false;
     private float volume = 1f;
     private Runnable timeoutRunnable, retryRunnable, stallRunnable;
+    private boolean buffering = false;
+    private Runnable loadingRunnable;
     private long lastUnlock = 0;
     private BroadcastReceiver userPresentReceiver;
 
@@ -170,6 +172,7 @@ public class MediaPlaybackService extends Service {
             nativeMode = true;
             volume = intent.getFloatExtra("volume", 1f);
             playing = true;
+            buffering = true;
             refresh();
             startStream(intent.getStringArrayExtra("urls"));
             return START_NOT_STICKY;
@@ -200,6 +203,7 @@ public class MediaPlaybackService extends Service {
                 readMeta(intent);
                 playing = intent.getBooleanExtra("playing", true);
             }
+            buffering = false;
             refresh();
             return START_NOT_STICKY;
         }
@@ -323,6 +327,8 @@ public class MediaPlaybackService extends Service {
                 if (!nativeMode || !wantPlay) return;
                 final long t = token;
                 if (state == Player.STATE_READY) {
+                    handler.removeCallbacks(loadingRunnable != null ? loadingRunnable : noop);
+                    setBuffering(false);
                     handler.removeCallbacks(timeoutRunnable != null ? timeoutRunnable : noop);
                     handler.removeCallbacks(stallRunnable != null ? stallRunnable : noop);
                     failCount = 0;
@@ -333,6 +339,18 @@ public class MediaPlaybackService extends Service {
                     }
                 } else if (state == Player.STATE_BUFFERING) {
                     if (startedReported) {
+                        // show "Loading..." only if the buffering lasts a moment (avoids flicker)
+                        handler.removeCallbacks(loadingRunnable != null ? loadingRunnable : noop);
+                        loadingRunnable = new Runnable() {
+                            @Override
+                            public void run() {
+                                if (t == token && wantPlay && player != null
+                                        && player.getPlaybackState() == Player.STATE_BUFFERING) {
+                                    setBuffering(true);
+                                }
+                            }
+                        };
+                        handler.postDelayed(loadingRunnable, 1500);
                         handler.removeCallbacks(stallRunnable != null ? stallRunnable : noop);
                         stallRunnable = new Runnable() {
                             @Override
@@ -464,6 +482,7 @@ public class MediaPlaybackService extends Service {
             failAll();
             return;
         }
+        setBuffering(true);
         long delay = Math.min(30000L, 1500L * failCount);
         final long t = token;
         retryRunnable = new Runnable() {
@@ -480,6 +499,7 @@ public class MediaPlaybackService extends Service {
 
     private void failAll() {
         diag(this, "gave up");
+        buffering = false;
         wantPlay = false;
         token++;
         cancelTimers();
@@ -492,6 +512,7 @@ public class MediaPlaybackService extends Service {
     }
 
     private void pauseStream(boolean notifyJs) {
+        buffering = false;
         token++;
         wantPlay = false;
         cancelTimers();
@@ -506,6 +527,7 @@ public class MediaPlaybackService extends Service {
     private void resumeStream() {
         if (urls.isEmpty()) return;
         playing = true;
+        buffering = true;
         refresh();
         emit("resumed");
         startStream(urls.toArray(new String[0]));
@@ -540,9 +562,23 @@ public class MediaPlaybackService extends Service {
         if (timeoutRunnable != null) handler.removeCallbacks(timeoutRunnable);
         if (retryRunnable != null) handler.removeCallbacks(retryRunnable);
         if (stallRunnable != null) handler.removeCallbacks(stallRunnable);
+        if (loadingRunnable != null) handler.removeCallbacks(loadingRunnable);
     }
 
     // ───────────────────────── notification + session ─────────────────────────
+
+    private void setBuffering(boolean b) {
+        if (buffering == b) return;
+        buffering = b;
+        if (nativeMode && playing) refresh();
+    }
+
+    /** "LIVE • subtitle" while playing, "Loading... • subtitle" while (re)connecting, plain subtitle when paused. */
+    private String displaySubtitle() {
+        if (!playing) return subtitle;
+        String tag = buffering ? "Loading..." : "LIVE";
+        return subtitle.isEmpty() ? tag : tag + " \u2022 " + subtitle;
+    }
 
     private void readMeta(Intent intent) {
         title = nz(intent.getStringExtra("title"));
@@ -656,7 +692,7 @@ public class MediaPlaybackService extends Service {
         if (session == null) return;
         MediaMetadata.Builder md = new MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, subtitle)
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, displaySubtitle())
                 .putString(MediaMetadata.METADATA_KEY_ALBUM, "Quran Radio");
         Bitmap art = getLargeIcon();
         if (art != null) md.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, art);
@@ -703,7 +739,7 @@ public class MediaPlaybackService extends Service {
 
         b.setSmallIcon(R.drawable.ic_stat_radio)
                 .setContentTitle(title)
-                .setContentText(subtitle)
+                .setContentText(displaySubtitle())
                 .setContentIntent(openAppIntent())
                 .setDeleteIntent(serviceIntent(ACTION_DISMISS, 9))
                 .setVisibility(Notification.VISIBILITY_PUBLIC)

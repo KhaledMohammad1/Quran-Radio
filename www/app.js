@@ -29,6 +29,11 @@ function applySystemBars(theme) {
       SystemBars.setStyle({ style: theme === 'dark' ? 'DARK' : 'LIGHT' });
     }
   } catch (_) {}
+  // remember the theme natively so the next launch can paint the right background immediately
+  try {
+    const M = NativePlugins.MediaControl;
+    if (M && M.setTheme) M.setTheme({ dark: theme === 'dark' });
+  } catch (_) {}
 }
 
 // ── Media notification (MediaStyle + MediaSession: shows on lock screen with controls) ──
@@ -2725,7 +2730,8 @@ function sendMessage(message) {
 // ⭐ دوال الوضع الليلي ⭐
 async function loadTheme() {
   const data = store.get('theme');
-  const savedTheme = data.theme || 'light';
+  const systemDark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const savedTheme = data.theme || (systemDark ? 'dark' : 'light');
   document.documentElement.setAttribute('data-theme', savedTheme);
   updateThemeIcon(savedTheme);
   applySystemBars(savedTheme);

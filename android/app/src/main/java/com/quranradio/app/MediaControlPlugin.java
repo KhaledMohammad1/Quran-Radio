@@ -149,6 +149,16 @@ public class MediaControlPlugin extends Plugin implements MediaPlaybackService.L
     }
 
     @PluginMethod
+    public void setTheme(PluginCall call) {
+        try {
+            Boolean dark = call.getBoolean("dark", false);
+            getContext().getSharedPreferences("qr_prefs", Context.MODE_PRIVATE)
+                    .edit().putBoolean("dark", dark != null && dark.booleanValue()).apply();
+        } catch (Exception ignored) {}
+        call.resolve();
+    }
+
+    @PluginMethod
     public void getStatus(PluginCall call) {
         JSObject o = new JSObject();
         o.put("running", MediaPlaybackService.running);
