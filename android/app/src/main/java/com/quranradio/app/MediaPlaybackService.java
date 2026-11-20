@@ -579,7 +579,7 @@ public class MediaPlaybackService extends Service {
         String tag = buffering ? "LOADING" : "LIVE";
         if (subtitle.isEmpty()) return tag;
         // Isolate the LTR status tag so it stays at the visual left edge of RTL text.
-        return subtitle + "　　　　\u2066" + tag + "\u2069";
+        return subtitle + "  \u2066" + tag + "\u2069";
     }
 
     private void readMeta(Intent intent) {

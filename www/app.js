@@ -2839,7 +2839,6 @@ const UPD_STRINGS = {
     title: 'تحديث جديد متاح',
     body: 'نسخة أحدث من التطبيق جاهزة. اضغط تحديث لتحميلها، ثم افتح الملف لتثبيتها فوق النسخة الحالية.',
     notes: 'الجديد:',
-    version: 'النسخة',
     now: 'تحديث الآن',
     later: 'لاحقاً'
   },
@@ -2847,7 +2846,6 @@ const UPD_STRINGS = {
     title: 'New update available',
     body: 'A newer version is ready. Tap Update to download it, then open the file to install it over the current one.',
     notes: "What's new:",
-    version: 'Version',
     now: 'Update now',
     later: 'Later'
   }
@@ -2888,7 +2886,7 @@ function openUpdateUrl(url) {
   try { window.location.href = url; } catch (_) {}
 }
 
-function showUpdateDialog(build, url, notes, versionLabel) {
+function showUpdateDialog(build, url, notes) {
   if (updateDialogEl) return;
   const overlay = document.createElement('div');
   overlay.className = 'upd-overlay';
@@ -2897,7 +2895,6 @@ function showUpdateDialog(build, url, notes, versionLabel) {
   box.className = 'upd-box';
   box.innerHTML = `
     <h2 class="upd-title"></h2>
-    <p class="upd-version"></p>
     <p class="upd-body"></p>
     <p class="upd-notes"></p>
     <div class="upd-actions">
@@ -2905,7 +2902,6 @@ function showUpdateDialog(build, url, notes, versionLabel) {
       <button type="button" class="upd-now"></button>
     </div>`;
   box.querySelector('.upd-title').textContent = updStr('title');
-  box.querySelector('.upd-version').textContent = `${updStr('version')} ${versionLabel || build}`;
   box.querySelector('.upd-body').textContent = updStr('body');
   const notesEl = box.querySelector('.upd-notes');
   if (cleanNotes) notesEl.textContent = `${updStr('notes')} ${cleanNotes}`; else notesEl.remove();
@@ -2944,7 +2940,7 @@ async function checkForUpdate(force) {
     const latest = parseInt(m[1], 10);
     if (latest <= updateCfg.build || latest === dismissedBuild) return;
     const asset = (rel.assets || []).find((a) => /\.apk$/i.test(a.name));
-    showUpdateDialog(latest, asset ? asset.browser_download_url : rel.html_url, rel.body, rel.name || `V${latest}`);
+    showUpdateDialog(latest, asset ? asset.browser_download_url : rel.html_url, rel.body);
   } catch (_) {}
 }
 
