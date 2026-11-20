@@ -1,7 +1,7 @@
 name: Build Android APK
 
-# - Every push: builds a test APK (Actions > the run > Artifacts). Nothing reaches users.
-# - Manual run ("Run workflow"): builds AND publishes a Release, so users get the update popup.
+# Pushes build and store an APK artifact.
+# Manual runs publish the latest successful APK artifact without rebuilding it.
 on:
   push:
     branches: [main, master]
@@ -12,17 +12,14 @@ on:
         required: false
         default: ""
         type: string
-      publish:
-        description: "Publish this build as a Release for users?"
-        required: true
-        default: true
-        type: boolean
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
   build:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
       APP_VERSION_CODE: ${{ github.run_number }}
@@ -74,20 +71,63 @@ jobs:
       - name: Rename APK
         run: cp android/app/build/outputs/apk/release/app-release.apk QuranRadio-1.${{ github.run_number }}.apk
 
-      - name: Upload APK (test artifact)
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: QuranRadio-APK
           path: QuranRadio-1.${{ github.run_number }}.apk
           if-no-files-found: error
+          retention-days: 90
 
-      - name: Publish Release (manual runs only)
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
+  publish:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find latest successful build artifact
+        id: source
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              { owner, repo, workflow_id: 'build-apk.yml', branch: 'main', status: 'success', per_page: 100 }
+            );
+
+            for (const run of runs) {
+              if (String(run.id) === String(context.runId)) continue;
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                { owner, repo, run_id: run.id, per_page: 100 }
+              );
+              const apkArtifact = artifacts.find(a => a.name === 'QuranRadio-APK' && !a.expired);
+              if (apkArtifact) {
+                core.setOutput('run_id', String(run.id));
+                core.setOutput('run_number', String(run.run_number));
+                core.setOutput('head_sha', run.head_sha);
+                core.info(`Using APK artifact from successful run #${run.run_number} (${run.id}).`);
+                return;
+              }
+            }
+
+            core.setFailed('No unexpired QuranRadio-APK artifact was found in any previous successful workflow run.');
+
+      - name: Download existing APK (no build)
+        uses: actions/download-artifact@v4
+        with:
+          name: QuranRadio-APK
+          path: release-assets
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish latest APK as a Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          target_commitish: ${{ github.sha }}
-          name: Quran Radio 1.${{ github.run_number }}
+          tag_name: build-${{ steps.source.outputs.run_number }}
+          target_commitish: ${{ steps.source.outputs.head_sha }}
+          name: Quran Radio 1.${{ steps.source.outputs.run_number }}
           body: ${{ inputs.notes }}
-          files: QuranRadio-1.${{ github.run_number }}.apk
+          files: release-assets/*.apk
+          overwrite_files: true
+          fail_on_unmatched_files: true
           make_latest: true
